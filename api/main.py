@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import get_db, init_db, Article
-from crawler import WebCrawler
+from crawler import WebCrawler, TrendingFetcher
 from analyzer import SentimentAnalyzer, LLMAnalyzer
 
 # 创建 FastAPI 应用
@@ -38,6 +38,7 @@ app.add_middleware(
 crawler = WebCrawler()
 sentiment_analyzer = SentimentAnalyzer()
 llm_analyzer = LLMAnalyzer()
+trending_fetcher = TrendingFetcher()
 
 
 # ============ Pydantic 模型 ============
@@ -295,6 +296,46 @@ async def delete_article(article_id: int, db: Session = Depends(get_db)):
         "success": True,
         "message": f"文章 {article_id} 已删除"
     }
+
+
+@app.get("/api/trending", response_model=dict)
+async def get_trending_topics(category: Optional[str] = "综合"):
+    """
+    获取热点话题
+    
+    Args:
+        category: 话题类别（综合、科技、财经、社会、娱乐、国际）
+        
+    Returns:
+        dict: 热点话题列表
+    """
+    try:
+        if not trending_fetcher.is_available():
+            return {
+                "success": False,
+                "message": "Tavily API 未配置或不可用",
+                "data": [],
+                "hint": "请在 .env 文件中配置 TAVILY_API_KEY"
+            }
+        
+        # 获取热点话题
+        topics = trending_fetcher.get_trending_by_category(category)
+        
+        return {
+            "success": True,
+            "category": category,
+            "count": len(topics),
+            "data": topics,
+            "message": f"成功获取 {len(topics)} 个热点话题"
+        }
+        
+    except Exception as e:
+        print(f"❌ 获取热点话题失败: {str(e)}")
+        return {
+            "success": False,
+            "message": f"获取失败: {str(e)}",
+            "data": []
+        }
 
 
 # ============ 运行服务 ============

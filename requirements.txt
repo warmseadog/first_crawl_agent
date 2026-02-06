@@ -25,3 +25,9 @@ plotly==5.18.0
 python-dotenv==1.0.1
 pydantic==2.6.0
 httpx==0.26.0
+
+# Tavily API (热点话题获取)
+tavily-python==0.3.0
+
+# 时区支持
+pytz==2024.1

@@ -8,13 +8,14 @@
 
 ### 核心功能
 
-- 🕷️ **智能爬虫**：使用 BeautifulSoup 抓取非结构化网页内容
-- 📊 **双层情感分析**：
-  - SnowNLP：快速量化分析（0-1 评分）
-  - 通义千问：深度语义理解
-- 🤖 **AI 增强**：自动生成摘要和舆情应对建议
-- 📈 **数据可视化**：实时展示情感走势和分布
-- 💾 **数据持久化**：SQLite 数据库存储
+- 🕷️ **智能爬虫**:使用 BeautifulSoup 抓取非结构化网页内容
+- 🔥 **热点话题推荐**:集成 Tavily API 自动获取当日热门新闻
+- 📊 **双层情感分析**:
+  - SnowNLP:快速量化分析（0-1 评分）
+  - 通义千问:深度语义理解
+- 🤖 **AI 增强**:自动生成摘要和舆情应对建议
+- 📈 **数据可视化**:实时展示情感走势和分布
+- 💾 **数据持久化**:SQLite 数据库存储
 
 ## 🛠️ 技术栈
 
@@ -23,6 +24,7 @@
 | 前端 | Streamlit + Plotly |
 | 后端 | FastAPI + SQLAlchemy |
 | 爬虫 | Requests + BeautifulSoup |
+| 热点话题 | Tavily Search API |
 | 分析 | SnowNLP + 通义千问 API |
 | 数据库 | SQLite |
 
@@ -57,12 +59,16 @@ pip install -r requirements.txt
 
 ### 2. 配置环境变量
 
-编辑 `.env` 文件，填入通义千问 API 密钥：
+编辑 `.env` 文件,填入 API 密钥:
 
 ```env
+# 通义千问 API
 LLM_API_KEY=your_api_key_here
 LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_MODEL_ID=qwen3-max
+
+# Tavily API (热点话题获取)
+TAVILY_API_KEY=your_tavily_api_key_here
 ```
 
 ### 3. 启动后端服务
