@@ -3,5 +3,6 @@
 """
 from .sentiment import SentimentAnalyzer
 from .llm_analyzer import LLMAnalyzer
+from .local_llm_analyzer import LocalLLMAnalyzer
 
-__all__ = ["SentimentAnalyzer", "LLMAnalyzer"]
+__all__ = ["SentimentAnalyzer", "LLMAnalyzer", "LocalLLMAnalyzer"]

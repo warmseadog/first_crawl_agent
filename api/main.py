@@ -16,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import get_db, init_db, Article
 from crawler import WebCrawler, TrendingFetcher
-from analyzer import SentimentAnalyzer, LLMAnalyzer
+from analyzer import SentimentAnalyzer, LLMAnalyzer, LocalLLMAnalyzer
 
 # 创建 FastAPI 应用
 app = FastAPI(
@@ -38,6 +38,7 @@ app.add_middleware(
 crawler = WebCrawler()
 sentiment_analyzer = SentimentAnalyzer()
 llm_analyzer = LLMAnalyzer()
+local_llm_analyzer = LocalLLMAnalyzer()
 trending_fetcher = TrendingFetcher()
 
 
@@ -172,6 +173,136 @@ async def collect_and_analyze(request: CollectRequest, db: Session = Depends(get
     except Exception as e:
         print(f"❌ 处理失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"处理失败: {str(e)}")
+
+
+@app.post("/api/quick_analyze", response_model=dict)
+async def quick_analyze(request: CollectRequest, db: Session = Depends(get_db)):
+    """
+    快速分析流程：爬取 -> 本地LLM快速分析
+    不保存到数据库，仅返回分析结果
+    
+    Args:
+        request: 包含 URL 和来源名称的请求
+        db: 数据库会话
+        
+    Returns:
+        dict: 快速分析结果
+    """
+    try:
+        # 1. 爬取网页内容
+        print(f"⚡ 快速分析: {request.url}")
+        crawl_result = crawler.crawl(request.url)
+        
+        if not crawl_result:
+            raise HTTPException(status_code=400, detail="网页爬取失败，请检查 URL 是否有效")
+        
+        title = crawl_result['title']
+        content = crawl_result['content']
+        
+        if len(content) < 50:
+            raise HTTPException(status_code=400, detail="提取的内容过短，可能不是有效文章")
+        
+        # 2. 本地LLM快速分析
+        print("⚡ 使用本地模型进行快速分析...")
+        analysis_result = local_llm_analyzer.quick_analyze(title, content)
+        
+        print(f"✅ 快速分析完成")
+        
+        return {
+            "success": True,
+            "mode": "quick",
+            "title": title,
+            "content": content[:500],  # 返回部分内容预览
+            "sentiment_score": analysis_result['sentiment_score'],
+            "sentiment_label": analysis_result['sentiment_label'],
+            "summary": analysis_result.get('summary', ''),
+            "message": "快速分析完成（未保存到数据库）"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ 快速分析失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"快速分析失败: {str(e)}")
+
+
+@app.post("/api/detailed_analyze", response_model=dict)
+async def detailed_analyze(request: CollectRequest, db: Session = Depends(get_db)):
+    """
+    详细分析流程：爬取 -> 情感分析 -> 云端LLM深度分析 -> 入库
+    完整分析并保存到数据库
+    
+    Args:
+        request: 包含 URL 和来源名称的请求
+        db: 数据库会话
+        
+    Returns:
+        dict: 详细分析结果
+    """
+    try:
+        # 1. 爬取网页内容
+        print(f"🔬 详细分析: {request.url}")
+        crawl_result = crawler.crawl(request.url)
+        
+        if not crawl_result:
+            raise HTTPException(status_code=400, detail="网页爬取失败，请检查 URL 是否有效")
+        
+        title = crawl_result['title']
+        content = crawl_result['content']
+        
+        if len(content) < 50:
+            raise HTTPException(status_code=400, detail="提取的内容过短，可能不是有效文章")
+        
+        # 2. SnowNLP 情感分析
+        print("📊 进行情感分析...")
+        sentiment_result = sentiment_analyzer.analyze(content)
+        sentiment_score = sentiment_result['score']
+        sentiment_label = sentiment_result['label']
+        
+        # 3. 云端LLM 深度分析
+        print("🤖 调用云端 LLM 生成摘要和建议...")
+        llm_result = llm_analyzer.analyze(
+            title=title,
+            content=content,
+            sentiment_score=sentiment_score,
+            sentiment_label=sentiment_label
+        )
+        
+        # 4. 保存到数据库
+        article = Article(
+            title=title,
+            content=content,
+            source=request.url,
+            sentiment_score=sentiment_score,
+            sentiment_label=sentiment_label,
+            summary=llm_result['summary'],
+            suggestions=llm_result['suggestions']
+        )
+        
+        db.add(article)
+        db.commit()
+        db.refresh(article)
+        
+        print(f"✅ 详细分析完成，文章 ID: {article.id}")
+        
+        return {
+            "success": True,
+            "mode": "detailed",
+            "article_id": article.id,
+            "title": title,
+            "content": content[:500],
+            "sentiment_score": sentiment_score,
+            "sentiment_label": sentiment_label,
+            "summary": llm_result['summary'],
+            "suggestions": llm_result['suggestions'],
+            "message": "详细分析完成并已保存到数据库"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ 详细分析失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"详细分析失败: {str(e)}")
 
 
 @app.get("/api/get_data", response_model=dict)

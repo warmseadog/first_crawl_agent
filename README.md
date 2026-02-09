@@ -68,7 +68,7 @@ LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_MODEL_ID=qwen3-max
 
 # Tavily API (热点话题获取)
-TAVILY_API_KEY=your_tavily_api_key_here
+TAVILY_API_KEY=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
 ```
 
 ### 3. 启动后端服务

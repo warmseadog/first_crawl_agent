@@ -403,11 +403,28 @@ def show_dashboard():
         """, unsafe_allow_html=True)
     
     with col2:
+        # 计算情感分布占比
+        total = stats['total_articles']
+        positive_pct = (stats['sentiment_distribution'].get('正面', 0) / max(total, 1)) * 100
+        neutral_pct = (stats['sentiment_distribution'].get('中性', 0) / max(total, 1)) * 100
+        negative_pct = (stats['sentiment_distribution'].get('负面', 0) / max(total, 1)) * 100
+        
+        # 判断主导情感
+        if positive_pct > 50:
+            dominant = "正面主导"
+            dom_color = "#28a745"
+        elif negative_pct > 30:
+            dominant = "负面警示"
+            dom_color = "#dc3545"
+        else:
+            dominant = "舆情平稳"
+            dom_color = "#ffc107"
+        
         st.markdown(f"""
-        <div class="stat-card">
-            <div class="stat-label">📊 平均情感</div>
-            <div class="stat-value">{stats['avg_sentiment_score']:.2f}</div>
-            <div class="stat-label">0-1 区间</div>
+        <div class="stat-card" style="background: linear-gradient(135deg, {dom_color} 0%, {dom_color}dd 100%);">
+            <div class="stat-label">🎯 舆情态势</div>
+            <div class="stat-value">{dominant}</div>
+            <div class="stat-label">正{positive_pct:.0f}% | 中{neutral_pct:.0f}% | 负{negative_pct:.0f}%</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -539,17 +556,27 @@ def show_dashboard():
                 x=df['created_at'],
                 y=df['sentiment_score'],
                 mode='lines+markers',
-                name='情感得分',
+                name='情感倾向',
                 line=dict(color='#667eea', width=3),
-                fill='tozeroy'
+                fill='tozeroy',
+                hovertemplate='<b>%{x}</b><br>得分: %{y:.2f}<extra></extra>'
             ))
+            
+            # 添加参考线
+            fig_trend.add_hline(y=0.6, line_dash="dash", line_color="green", 
+                               annotation_text="正面阈值", annotation_position="right")
+            fig_trend.add_hline(y=0.4, line_dash="dash", line_color="red", 
+                               annotation_text="负面阈值", annotation_position="right")
+            
             fig_trend.update_layout(
-                title="情感走势",
+                title="情感走势 (仅供参考)",
                 xaxis_title="时间",
-                yaxis_title="情感得分",
-                height=350
+                yaxis_title="统计得分 (SnowNLP)",
+                height=350,
+                yaxis=dict(range=[0, 1])
             )
             st.plotly_chart(fig_trend, use_container_width=True)
+            st.caption("💡 此图表基于传统统计算法,仅作趋势参考。详细分析请查看各文章的 AI 深度报告。")
     
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -560,9 +587,15 @@ def show_collection():
     st.markdown('<div class="content-card">', unsafe_allow_html=True)
     st.markdown("### 🔍 舆情数据采集")
     
-    # 预填充URL
-    default_url = st.session_state.get('selected_url', '')
-    default_title = st.session_state.get('selected_title', '网络来源')
+    # 初始化session state用于保存当前输入
+    if 'current_url' not in st.session_state:
+        st.session_state['current_url'] = ''
+    if 'current_source' not in st.session_state:
+        st.session_state['current_source'] = '网络来源'
+    
+    # 预填充URL (优先使用热点话题选择的URL,否则使用当前保存的URL)
+    default_url = st.session_state.get('selected_url', st.session_state['current_url'])
+    default_title = st.session_state.get('selected_title', st.session_state['current_source'])
     
     col1, col2 = st.columns([3, 1])
     
@@ -570,53 +603,178 @@ def show_collection():
         url = st.text_input(
             "📎 文章 URL",
             value=default_url,
-            placeholder="https://example.com/article"
+            placeholder="https://example.com/article",
+            key="url_input"
         )
     
     with col2:
         source_name = st.text_input(
             "📰 来源",
-            value=default_title if default_url else "网络来源"
+            value=default_title,
+            key="source_input"
         )
     
-    if st.button("🚀 开始分析", use_container_width=True, type="primary"):
-        if 'selected_url' in st.session_state:
-            del st.session_state['selected_url']
-        if 'selected_title' in st.session_state:
-            del st.session_state['selected_title']
-        
+    # 双按钮布局
+    col_btn1, col_btn2 = st.columns(2)
+    
+    with col_btn1:
+        quick_analyze_btn = st.button("⚡ 快速分析", use_container_width=True, type="secondary")
+    
+    with col_btn2:
+        detailed_analyze_btn = st.button("🔬 详细分析", use_container_width=True, type="primary")
+    
+    # 快速分析逻辑
+    if quick_analyze_btn:
         if not url:
             st.error("❌ 请输入 URL")
         else:
-            with st.spinner("正在分析..."):
+            # 保存当前URL到session state,以便分析后保留
+            st.session_state['current_url'] = url
+            st.session_state['current_source'] = source_name
+            # 清除热点话题选择的URL
+            if 'selected_url' in st.session_state:
+                del st.session_state['selected_url']
+            if 'selected_title' in st.session_state:
+                del st.session_state['selected_title']
+            
+            with st.spinner("⚡ 正在进行快速分析..."):
+                try:
+                    response = requests.post(
+                        f"{API_BASE_URL}/api/quick_analyze",
+                        json={"url": url, "source_name": source_name},
+                        timeout=30
+                    )
+                    result = response.json()
+                    
+                    if result.get('success'):
+                        st.success("✅ 快速分析完成!")
+                        
+                        # 显示分析结果
+                        st.markdown("---")
+                        st.markdown("#### 📊 快速分析结果")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.metric("情感得分", f"{result['sentiment_score']:.3f}")
+                        with col2:
+                            sentiment_label = result['sentiment_label']
+                            color = get_sentiment_color(sentiment_label)
+                            st.markdown(f"<div style='text-align: center;'><div class='stat-card' style='background: {color}; padding: 1rem;'>{sentiment_label}</div></div>", unsafe_allow_html=True)
+                        with col3:
+                            st.metric("分析模式", "快速 ⚡")
+                        
+                        # 标题和摘要
+                        st.markdown(f"**📰 标题**: {result['title']}")
+                        
+                        if result.get('summary'):
+                            st.markdown(f"**📝 摘要**: {result['summary']}")
+                        
+                        # 内容预览
+                        with st.expander("📄 查看内容预览"):
+                            st.markdown(result.get('content', '')[:500] + "...")
+                        
+                        st.info("💡 提示: 快速分析结果未保存到数据库。如需保存,请使用详细分析。")
+                        
+                    else:
+                        st.error(f"❌ 分析失败: {result.get('detail', '未知错误')}")
+                        
+                except Exception as e:
+                    st.error(f"❌ 请求失败: {str(e)}")
+    
+    # 详细分析逻辑
+    if detailed_analyze_btn:
+        if not url:
+            st.error("❌ 请输入 URL")
+        else:
+            # 保存当前URL到session state
+            st.session_state['current_url'] = url
+            st.session_state['current_source'] = source_name
+            # 清除热点话题选择的URL
+            if 'selected_url' in st.session_state:
+                del st.session_state['selected_url']
+            if 'selected_title' in st.session_state:
+                del st.session_state['selected_title']
+            
+            with st.spinner("🔬 正在进行详细分析..."):
                 progress_bar = st.progress(0)
                 for i in range(100):
                     time.sleep(0.01)
                     progress_bar.progress(i + 1)
                 
-                result = collect_and_analyze(url, source_name)
-                
-                if result.get('success'):
-                    st.success("✅ 分析完成!")
+                try:
+                    response = requests.post(
+                        f"{API_BASE_URL}/api/detailed_analyze",
+                        json={"url": url, "source_name": source_name},
+                        timeout=60
+                    )
+                    result = response.json()
                     
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("文章 ID", result['article_id'])
-                    with col2:
-                        st.metric("情感得分", f"{result['sentiment_score']:.3f}")
-                    with col3:
-                        st.metric("标题", result['title'][:20] + "...")
-                    with col4:
+                    if result.get('success'):
+                        st.success("✅ 详细分析完成!")
+                        
+                        # 显示分析结果
+                        st.markdown("---")
+                        st.markdown(f"#### 🏷️ 分析报告: {result['title']}")
+                        
+                        # 第一层：AI 核心结论 (高优先级)
+                        col_summary, col_suggestions = st.columns(2)
+                        with col_summary:
+                            st.markdown("##### 📋 AI 核心摘要")
+                            st.info(result.get('summary', '无摘要'))
+                        
+                        with col_suggestions:
+                            st.markdown("##### 💡 应对建议")
+                            st.warning(result.get('suggestions', '无建议'))
+
+                        # 第二层：关键指标 (中优先级)
+                        st.markdown("##### 📊 关键指标")
+                        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+                        
                         sentiment_label = result['sentiment_label']
                         color = get_sentiment_color(sentiment_label)
-                        st.markdown(f"<div class='stat-card' style='background: {color};'>{sentiment_label}</div>", unsafe_allow_html=True)
-                    
-                    st.balloons()
-                else:
-                    st.error(f"❌ 分析失败: {result.get('detail', '未知错误')}")
+                        
+                        with m_col1:
+                            st.metric("核心倾向 (AI)", sentiment_label)
+                        with m_col2:
+                            st.metric("分析深度", "深度云端 🔬")
+                        with m_col3:
+                            st.metric("文章 ID", result.get('article_id', 'N/A'))
+                        with m_col4:
+                            # 逻辑：中性通常意味着模型判断较谨慎或内容确实客观
+                            st.metric("结论可靠度", "极高 ✅" if sentiment_label != "中性" else "正常 ⚖️")
+
+                        # 第三层：保底/技术细节 (低优先级 - 放在折叠栏中)
+                        with st.expander("🛠️ 底层计算指标 (SnowNLP 保底系统)"):
+                            st.markdown("""
+                            > [!NOTE]
+                            > 此处展示基于统计学的传统算法结果。它不理解语义逻辑，仅作为 AI 深度分析的数理参考。
+                            """)
+                            t_col1, t_col2 = st.columns(2)
+                            with t_col1:
+                                st.write(f"**词频得分**: `{result['sentiment_score']:.3f}`")
+                                st.caption("（范围 0-1，由 SnowNLP 统计得出）")
+                            with t_col2:
+                                is_polarized = result['sentiment_score'] > 0.9 or result['sentiment_score'] < 0.1
+                                st.write(f"**极化风险**: {'高' if is_polarized else '低'}")
+                                st.caption("（分值越接近 0/1，传统系统误判概率越大）")
+                        
+                        # 内容预览
+                        with st.expander("📄 查看网页原文本预览"):
+                            st.markdown(result.get('content', '')[:1000] + "...")
+                        
+                        st.success("✅ 深度分析报告已完整保存至数据库")
+                        st.balloons()
+                        
+                    else:
+                        st.error(f"❌ 分析失败: {result.get('detail', '未知错误')}")
+                        
+                except Exception as e:
+                    st.error(f"❌ 请求失败: {str(e)}")
     
     st.markdown('</div>', unsafe_allow_html=True)
+
+
 
 
 # ============ 详细列表页面 ============
@@ -664,7 +822,6 @@ def show_data_list():
                     </a>
                     <div style="margin-top: 0.5rem;">
                         <span class="tag" style="background: {color};">{article['sentiment_label']}</span>
-                        <span class="tag">得分: {article['sentiment_score']:.3f}</span>
                         <span style="color: #95a5a6; font-size: 0.85rem; margin-left: 1rem;">
                             📅 {article['created_at']}
                         </span>
@@ -683,11 +840,15 @@ def show_data_list():
         """, unsafe_allow_html=True)
         
         if article['summary'] or article['suggestions']:
-            with st.expander("查看详细分析"):
+            with st.expander("📊 查看完整分析报告"):
                 if article['summary']:
-                    st.markdown(f"**📋 摘要**: {article['summary']}")
+                    st.markdown(f"**📋 AI 摘要**: {article['summary']}")
                 if article['suggestions']:
-                    st.markdown(f"**💡 建议**: {article['suggestions']}")
+                    st.markdown(f"**💡 应对建议**: {article['suggestions']}")
+                
+                # 将 SnowNLP 得分放在这里作为技术参考
+                st.markdown("---")
+                st.caption(f"🛠️ **底层统计得分**: `{article['sentiment_score']:.3f}` (SnowNLP 保底系统)")
     
     st.markdown('</div>', unsafe_allow_html=True)
 
