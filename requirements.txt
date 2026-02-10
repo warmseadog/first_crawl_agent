@@ -29,5 +29,8 @@ httpx==0.26.0
 # Tavily API (热点话题获取)
 tavily-python==0.3.0
 
+# RAG 向量检索
+chromadb==0.5.0
+
 # 时区支持
 pytz==2024.1

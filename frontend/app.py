@@ -337,7 +337,7 @@ def main():
     
     with col2:
         # 导航按钮
-        nav_col1, nav_col2, nav_col3 = st.columns(3)
+        nav_col1, nav_col2, nav_col3, nav_col4 = st.columns(4)
         
         with nav_col1:
             if st.button("📈 数据概览", key="nav_dashboard", use_container_width=True):
@@ -352,6 +352,11 @@ def main():
         with nav_col3:
             if st.button("📋 详细列表", key="nav_list", use_container_width=True):
                 st.session_state['current_page'] = '详细列表'
+                st.rerun()
+        
+        with nav_col4:
+            if st.button("🤖 智能助手", key="nav_rag", use_container_width=True):
+                st.session_state['current_page'] = '智能助手'
                 st.rerun()
     
     with col3:
@@ -378,6 +383,8 @@ def main():
         show_collection()
     elif st.session_state['current_page'] == '详细列表':
         show_data_list()
+    elif st.session_state['current_page'] == '智能助手':
+        show_rag_chat()
 
 
 # ============ 数据概览页面 ============
@@ -569,14 +576,14 @@ def show_dashboard():
                                annotation_text="负面阈值", annotation_position="right")
             
             fig_trend.update_layout(
-                title="情感走势 (仅供参考)",
+                title="情感走势 (AI 深度分析)",
                 xaxis_title="时间",
-                yaxis_title="统计得分 (SnowNLP)",
+                yaxis_title="情感得分 (AI)",
                 height=350,
                 yaxis=dict(range=[0, 1])
             )
             st.plotly_chart(fig_trend, use_container_width=True)
-            st.caption("💡 此图表基于传统统计算法,仅作趋势参考。详细分析请查看各文章的 AI 深度报告。")
+            st.caption("💡 此图表展示 AI 分析的情感得分趋势。0为极端负面，1为极端正面。")
     
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -744,20 +751,28 @@ def show_collection():
                             # 逻辑：中性通常意味着模型判断较谨慎或内容确实客观
                             st.metric("结论可靠度", "极高 ✅" if sentiment_label != "中性" else "正常 ⚖️")
 
-                        # 第三层：保底/技术细节 (低优先级 - 放在折叠栏中)
-                        with st.expander("🛠️ 底层计算指标 (SnowNLP 保底系统)"):
+                        # 第三层：详细评分指标 (低优先级 - 放在折叠栏中)
+                        with st.expander("📊 详细评分指标 (AI 模型)"):
                             st.markdown("""
                             > [!NOTE]
-                            > 此处展示基于统计学的传统算法结果。它不理解语义逻辑，仅作为 AI 深度分析的数理参考。
+                            > 此处展示基于大语言模型的深度语义分析结果。评分综合考虑了文章的情感倾向、语气强弱及潜在影响。
                             """)
                             t_col1, t_col2 = st.columns(2)
                             with t_col1:
-                                st.write(f"**词频得分**: `{result['sentiment_score']:.3f}`")
-                                st.caption("（范围 0-1，由 SnowNLP 统计得出）")
+                                st.write(f"**情感得分**: `{result['sentiment_score']:.3f}`")
+                                st.caption("（范围 0-1，由 AI 综合评估得出）")
                             with t_col2:
-                                is_polarized = result['sentiment_score'] > 0.9 or result['sentiment_score'] < 0.1
-                                st.write(f"**极化风险**: {'高' if is_polarized else '低'}")
-                                st.caption("（分值越接近 0/1，传统系统误判概率越大）")
+                                # 根据分数判断情感强度
+                                score = result['sentiment_score']
+                                if score > 0.8 or score < 0.2:
+                                    intensity = "强烈"
+                                elif score > 0.6 or score < 0.4:
+                                    intensity = "明显"
+                                else:
+                                    intensity = "温和"
+                                    
+                                st.write(f"**情感强度**: {intensity}")
+                                st.caption("（基于得分偏离中性值的程度）")
                         
                         # 内容预览
                         with st.expander("📄 查看网页原文本预览"):
@@ -850,6 +865,157 @@ def show_data_list():
                 st.markdown("---")
                 st.caption(f"🛠️ **底层统计得分**: `{article['sentiment_score']:.3f}` (SnowNLP 保底系统)")
     
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ============ RAG 智能助手页面 ============
+
+def show_rag_chat():
+    st.markdown('<div class="content-card">', unsafe_allow_html=True)
+    st.markdown("### 🤖 舆情智能助手 (RAG)")
+    st.caption("基于已采集的舆情数据进行智能问答，回答时会引用具体的文章来源。")
+
+    # 侧边功能区
+    col_chat, col_info = st.columns([3, 1])
+
+    with col_info:
+        # 知识库状态
+        st.markdown("#### 📚 知识库")
+        try:
+            rag_stats = requests.get(f"{API_BASE_URL}/api/rag/stats", timeout=5).json()
+            if rag_stats.get('success'):
+                doc_count = rag_stats.get('total_documents', 0)
+                st.metric("已索引文章数", doc_count)
+                st.caption(f"模型: {rag_stats.get('embedding_model', 'N/A')}")
+            else:
+                st.warning("知识库未就绪")
+                doc_count = 0
+        except:
+            st.error("无法连接后端")
+            doc_count = 0
+
+        # 同步按钮
+        if st.button("🔄 同步知识库", use_container_width=True, help="将数据库中的文章同步到向量知识库"):
+            with st.spinner("正在同步..."):
+                try:
+                    resp = requests.post(f"{API_BASE_URL}/api/rag/sync", timeout=60).json()
+                    if resp.get('success'):
+                        st.success(f"✅ {resp.get('message', '同步完成')}")
+                        st.rerun()
+                    else:
+                        st.error("同步失败")
+                except Exception as e:
+                    st.error(f"同步出错: {e}")
+
+        st.markdown("---")
+        st.markdown("#### 💡 试试问")
+        example_questions = [
+            "最近有哪些负面新闻？",
+            "总结一下已采集文章的主要观点",
+            "哪些话题的舆情风险最高？",
+            "给我一份舆情简报"
+        ]
+        for q in example_questions:
+            if st.button(f"💬 {q}", key=f"example_{q}", use_container_width=True):
+                st.session_state['rag_pending_question'] = q
+                st.rerun()
+
+    with col_chat:
+        # 初始化对话历史
+        if 'rag_messages' not in st.session_state:
+            st.session_state['rag_messages'] = []
+
+        # 显示对话历史
+        for msg in st.session_state['rag_messages']:
+            with st.chat_message(msg['role'], avatar="🧑‍💻" if msg['role'] == 'user' else "🤖"):
+                st.markdown(msg['content'])
+                # 显示引用来源
+                if msg.get('sources'):
+                    with st.expander(f"📎 引用来源 ({len(msg['sources'])} 篇)"):
+                        for src in msg['sources']:
+                            sentiment_color = get_sentiment_color(src.get('sentiment_label', ''))
+                            st.markdown(
+                                f"- **{src['title']}** "
+                                f"<span style='color:{sentiment_color};font-weight:bold;'>[{src.get('sentiment_label', '')}]</span> "
+                                f"相关度: {src.get('relevance', 0):.0%}",
+                                unsafe_allow_html=True
+                            )
+                            if src.get('source'):
+                                st.caption(f"🔗 {src['source']}")
+
+        # 处理预设问题
+        pending = st.session_state.pop('rag_pending_question', None)
+
+        # 用户输入
+        user_input = st.chat_input("输入你的舆情问题...", key="rag_chat_input")
+        question = pending or user_input
+
+        if question:
+            # 显示用户消息
+            st.session_state['rag_messages'].append({"role": "user", "content": question})
+            with st.chat_message("user", avatar="🧑‍💻"):
+                st.markdown(question)
+
+            # 调用 RAG API
+            with st.chat_message("assistant", avatar="🤖"):
+                with st.spinner("正在检索知识库并生成回答..."):
+                    try:
+                        # 构建对话历史（只传 role + content）
+                        history = [
+                            {"role": m["role"], "content": m["content"]}
+                            for m in st.session_state['rag_messages'][:-1]  # 不包含刚加的这条
+                        ]
+
+                        resp = requests.post(
+                            f"{API_BASE_URL}/api/rag/chat",
+                            json={
+                                "question": question,
+                                "chat_history": history[-12:]  # 最近6轮
+                            },
+                            timeout=60
+                        ).json()
+
+                        if resp.get('success'):
+                            answer = resp['answer']
+                            sources = resp.get('sources', [])
+
+                            st.markdown(answer)
+
+                            # 显示引用
+                            if sources:
+                                with st.expander(f"📎 引用来源 ({len(sources)} 篇)"):
+                                    for src in sources:
+                                        sentiment_color = get_sentiment_color(src.get('sentiment_label', ''))
+                                        st.markdown(
+                                            f"- **{src['title']}** "
+                                            f"<span style='color:{sentiment_color};font-weight:bold;'>[{src.get('sentiment_label', '')}]</span> "
+                                            f"相关度: {src.get('relevance', 0):.0%}",
+                                            unsafe_allow_html=True
+                                        )
+                                        if src.get('source'):
+                                            st.caption(f"🔗 {src['source']}")
+
+                            # 保存到对话历史
+                            st.session_state['rag_messages'].append({
+                                "role": "assistant",
+                                "content": answer,
+                                "sources": sources
+                            })
+
+                            # 底部统计
+                            st.caption(f"📊 检索了 {resp.get('search_count', 0)} 篇相关文章 | 知识库共 {resp.get('total_documents', 0)} 篇")
+                        else:
+                            st.error(f"❌ {resp.get('detail', '回答生成失败')}")
+
+                    except Exception as e:
+                        st.error(f"❌ 请求失败: {str(e)}")
+
+        # 清空对话按钮
+        if st.session_state['rag_messages']:
+            if st.button("🗑️ 清空对话", key="clear_chat"):
+                st.session_state['rag_messages'] = []
+                st.rerun()
+
     st.markdown('</div>', unsafe_allow_html=True)
 
 

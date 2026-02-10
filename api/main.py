@@ -17,6 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import get_db, init_db, Article
 from crawler import WebCrawler, TrendingFetcher
 from analyzer import SentimentAnalyzer, LLMAnalyzer, LocalLLMAnalyzer
+from rag import VectorStore, RAGEngine
 
 # 创建 FastAPI 应用
 app = FastAPI(
@@ -40,6 +41,10 @@ sentiment_analyzer = SentimentAnalyzer()
 llm_analyzer = LLMAnalyzer()
 local_llm_analyzer = LocalLLMAnalyzer()
 trending_fetcher = TrendingFetcher()
+
+# RAG 组件
+vector_store = VectorStore()
+rag_engine = RAGEngine(vector_store=vector_store)
 
 
 # ============ Pydantic 模型 ============
@@ -104,7 +109,7 @@ async def root():
 @app.post("/api/collect_and_analyze", response_model=dict)
 async def collect_and_analyze(request: CollectRequest, db: Session = Depends(get_db)):
     """
-    完整的舆情分析流程：爬取 -> 情感分析 -> LLM 分析 -> 入库
+    完整的舆情分析流程：爬取 -> LLM 全量分析 -> 入库
     
     Args:
         request: 包含 URL 和来源名称的请求
@@ -127,28 +132,20 @@ async def collect_and_analyze(request: CollectRequest, db: Session = Depends(get
         if len(content) < 50:
             raise HTTPException(status_code=400, detail="提取的内容过短，可能不是有效文章")
         
-        # 2. SnowNLP 情感分析
-        print("📊 进行情感分析...")
-        sentiment_result = sentiment_analyzer.analyze(content)
-        sentiment_score = sentiment_result['score']
-        sentiment_label = sentiment_result['label']
-        
-        # 3. LLM 深度分析
-        print("🤖 调用 LLM 生成摘要和建议...")
+        # 2. LLM 全量分析 (情感 + 摘要 + 建议)
+        print("🤖 调用 LLM 进行全量分析...")
         llm_result = llm_analyzer.analyze(
             title=title,
-            content=content,
-            sentiment_score=sentiment_score,
-            sentiment_label=sentiment_label
+            content=content
         )
         
-        # 4. 保存到数据库
+        # 3. 保存到数据库
         article = Article(
             title=title,
             content=content,
             source=request.url,
-            sentiment_score=sentiment_score,
-            sentiment_label=sentiment_label,
+            sentiment_score=llm_result['sentiment_score'],
+            sentiment_label=llm_result['sentiment_label'],
             summary=llm_result['summary'],
             suggestions=llm_result['suggestions']
         )
@@ -163,8 +160,8 @@ async def collect_and_analyze(request: CollectRequest, db: Session = Depends(get
             "success": True,
             "article_id": article.id,
             "title": title,
-            "sentiment_score": sentiment_score,
-            "sentiment_label": sentiment_label,
+            "sentiment_score": llm_result['sentiment_score'],
+            "sentiment_label": llm_result['sentiment_label'],
             "message": "分析完成并已保存"
         }
         
@@ -229,7 +226,7 @@ async def quick_analyze(request: CollectRequest, db: Session = Depends(get_db)):
 @app.post("/api/detailed_analyze", response_model=dict)
 async def detailed_analyze(request: CollectRequest, db: Session = Depends(get_db)):
     """
-    详细分析流程：爬取 -> 情感分析 -> 云端LLM深度分析 -> 入库
+    详细分析流程：爬取 -> 云端LLM深度全量分析 -> 入库
     完整分析并保存到数据库
     
     Args:
@@ -253,28 +250,20 @@ async def detailed_analyze(request: CollectRequest, db: Session = Depends(get_db
         if len(content) < 50:
             raise HTTPException(status_code=400, detail="提取的内容过短，可能不是有效文章")
         
-        # 2. SnowNLP 情感分析
-        print("📊 进行情感分析...")
-        sentiment_result = sentiment_analyzer.analyze(content)
-        sentiment_score = sentiment_result['score']
-        sentiment_label = sentiment_result['label']
-        
-        # 3. 云端LLM 深度分析
-        print("🤖 调用云端 LLM 生成摘要和建议...")
+        # 2. LLM 全量分析
+        print("🤖 调用云端 LLM 进行全量分析...")
         llm_result = llm_analyzer.analyze(
             title=title,
-            content=content,
-            sentiment_score=sentiment_score,
-            sentiment_label=sentiment_label
+            content=content
         )
         
-        # 4. 保存到数据库
+        # 3. 保存到数据库
         article = Article(
             title=title,
             content=content,
             source=request.url,
-            sentiment_score=sentiment_score,
-            sentiment_label=sentiment_label,
+            sentiment_score=llm_result['sentiment_score'],
+            sentiment_label=llm_result['sentiment_label'],
             summary=llm_result['summary'],
             suggestions=llm_result['suggestions']
         )
@@ -282,6 +271,21 @@ async def detailed_analyze(request: CollectRequest, db: Session = Depends(get_db
         db.add(article)
         db.commit()
         db.refresh(article)
+        
+        # 同步到向量库（RAG 知识库）
+        try:
+            vector_store.add_article(
+                article_id=article.id,
+                title=title,
+                content=content,
+                sentiment_label=llm_result['sentiment_label'],
+                sentiment_score=llm_result['sentiment_score'],
+                source=request.url,
+                summary=llm_result['summary']
+            )
+            print(f"📦 文章已同步到向量库")
+        except Exception as ve:
+            print(f"⚠️ 向量化同步失败（不影响分析结果）: {ve}")
         
         print(f"✅ 详细分析完成，文章 ID: {article.id}")
         
@@ -291,8 +295,8 @@ async def detailed_analyze(request: CollectRequest, db: Session = Depends(get_db
             "article_id": article.id,
             "title": title,
             "content": content[:500],
-            "sentiment_score": sentiment_score,
-            "sentiment_label": sentiment_label,
+            "sentiment_score": llm_result['sentiment_score'],
+            "sentiment_label": llm_result['sentiment_label'],
             "summary": llm_result['summary'],
             "suggestions": llm_result['suggestions'],
             "message": "详细分析完成并已保存到数据库"
@@ -467,6 +471,67 @@ async def get_trending_topics(category: Optional[str] = "综合"):
             "message": f"获取失败: {str(e)}",
             "data": []
         }
+
+
+# ============ RAG 智能问答 API ============
+
+class ChatRequest(BaseModel):
+    """RAG 对话请求模型"""
+    question: str
+    chat_history: Optional[List[dict]] = []
+    sentiment_filter: Optional[str] = None
+
+
+@app.post("/api/rag/chat", response_model=dict)
+async def rag_chat(request: ChatRequest):
+    """
+    RAG 智能对话接口
+    
+    基于已采集的舆情数据进行智能问答
+    
+    Args:
+        request: 包含问题和对话历史的请求
+        
+    Returns:
+        dict: 包含回答、引用来源和统计信息
+    """
+    try:
+        result = rag_engine.chat(
+            question=request.question,
+            chat_history=request.chat_history,
+            sentiment_filter=request.sentiment_filter
+        )
+        return {
+            "success": True,
+            **result
+        }
+    except Exception as e:
+        print(f"❌ RAG 对话失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"对话失败: {str(e)}")
+
+
+@app.get("/api/rag/stats", response_model=dict)
+async def rag_stats():
+    """获取 RAG 知识库统计信息"""
+    try:
+        stats = vector_store.get_stats()
+        return {"success": True, **stats}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取统计失败: {str(e)}")
+
+
+@app.post("/api/rag/sync", response_model=dict)
+async def rag_sync(db: Session = Depends(get_db)):
+    """将数据库文章同步到向量库"""
+    try:
+        synced = vector_store.sync_from_db(db)
+        return {
+            "success": True,
+            "synced_count": synced,
+            "message": f"同步完成，共 {synced} 篇文章"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"同步失败: {str(e)}")
 
 
 # ============ 运行服务 ============
