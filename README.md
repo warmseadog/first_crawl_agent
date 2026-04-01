@@ -35,18 +35,26 @@
 ├── .env                    # 环境变量配置
 ├── requirements.txt        # Python 依赖
 ├── README.md              # 项目说明
+├── PERFORMANCE_OPTIMIZATION.md  # 性能优化指南
+├── rag_stages_visual.md   # RAG系统构建阶段图解
+├── rag_system_architecture.md  # RAG系统架构文档
 ├── database/              # 数据库模块
 │   ├── models.py         # 数据模型
 │   └── database.py       # 数据库配置
 ├── crawler/               # 爬虫模块
-│   └── web_crawler.py    # 网页爬虫
+│   ├── web_crawler.py    # 网页爬虫
+│   └── trending_fetcher.py # 热点话题获取
 ├── analyzer/              # 分析模块
 │   ├── sentiment.py      # SnowNLP 情感分析
-│   └── llm_analyzer.py   # LLM 集成
+│   ├── llm_analyzer.py   # 云端LLM集成
+│   └── local_llm_analyzer.py # 本地LLM集成
 ├── api/                   # FastAPI 后端
 │   └── main.py           # API 服务
-└── frontend/              # Streamlit 前端
-    └── app.py            # 可视化界面
+├── frontend/              # Streamlit 前端
+│   └── app.py            # 可视化界面
+└── rag/                   # RAG模块
+    ├── rag_engine.py     # RAG引擎
+    └── vector_store.py   # 向量存储
 ```
 
 ## 🚀 快速开始
@@ -104,15 +112,30 @@ streamlit run app.py
 
 - **数据概览**：查看统计数据、情感分布图、走势图
 - **详细列表**：浏览所有文章，查看完整分析结果
+- **智能助手**：使用RAG系统进行智能问答
+
+### 前端页面功能
+
+- **📊 数据概览**：实时展示统计数据、情感分布和趋势图
+- **🔍 数据采集**：输入URL进行舆情分析
+- **📋 详细列表**：浏览历史分析结果
+- **🤖 智能助手**：基于RAG系统的智能问答功能
 
 ### API 接口
 
 访问 `http://localhost:8000/docs` 查看完整 API 文档
 
 主要接口：
-- `POST /api/collect_and_analyze` - 触发分析流程
+- `POST /api/collect_and_analyze` - 触发完整分析流程
+- `POST /api/quick_analyze` - 快速分析（不保存到数据库）
+- `POST /api/detailed_analyze` - 详细分析（保存到数据库）
 - `GET /api/get_data` - 获取舆情数据
 - `GET /api/stats` - 获取统计信息
+- `DELETE /api/delete_article` - 删除指定文章
+- `GET /api/get_trending_topics` - 获取热点话题
+- `POST /api/rag/chat` - RAG智能问答接口
+- `GET /api/rag/stats` - RAG统计信息
+- `POST /api/rag/sync` - 同步数据库到向量库
 
 ## 🎯 技术亮点
 
@@ -171,6 +194,9 @@ python analyzer/sentiment.py
 
 # 测试 LLM
 python analyzer/llm_analyzer.py
+
+# 测试 RAG系统
+python rag/rag_engine.py
 ```
 
 ### 数据库初始化

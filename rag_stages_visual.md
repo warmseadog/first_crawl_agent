@@ -81,3 +81,18 @@ graph LR
     style C fill:#f3e5f5
 ```
 策略：要求基于检索内容生成，必须标注引用来源
+
+## 阶段7：RAG对话管理
+```mermaid
+graph LR
+    A[用户问题] --> B[历史对话]
+    B --> C[上下文整合]
+    C --> D[向量检索]
+    D --> E[LLM生成]
+    E --> F[回复用户]
+    F --> G[更新历史]
+
+    style C fill:#fff3e0
+    style G fill:#f3e5f5
+```
+策略：维护对话状态，支持多轮问答，记录引用来源

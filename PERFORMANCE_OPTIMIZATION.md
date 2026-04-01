@@ -1,8 +1,6 @@
-# 快速分析性能优化说明
+# 舆情监测平台性能优化说明
 
 ## 问题分析
-
-快速分析慢的主要原因:
 
 ### 1. **网页爬取是最大瓶颈** (占总时间80-90%)
 
@@ -20,6 +18,12 @@
 
 - Ollama首次调用需要加载模型到内存
 - `qwen2:1.5b` 虽然是轻量模型,但仍需1-3秒推理时间
+
+### 3. **RAG系统查询性能** (新增功能)
+
+RAG系统在处理大量数据时可能出现延迟：
+- 向量检索耗时随数据库增长而增加
+- 大量上下文构建影响LLM响应速度
 
 ## 优化建议
 
@@ -80,6 +84,30 @@ def fetch_page(self, url: str) -> Optional[str]:
     )
 ```
 
+### 方案5: RAG性能优化 (新增)
+
+针对RAG系统性能优化建议：
+
+```python
+# 在 rag/vector_store.py 中优化检索参数
+def search(self, query: str, top_k: int = 5, threshold: float = 0.7):
+    """
+    优化检索性能
+    - top_k: 控制返回结果数量，避免过多上下文
+    - threshold: 设置相似度阈值，提高检索精度
+    """
+    results = self.collection.query(
+        query_texts=[query],
+        n_results=top_k * 2  # 查询更多候选项以提高质量
+    )
+    # 过滤低相似度结果
+    filtered_results = [
+        r for r, d in zip(results['documents'][0], results['distances'][0])
+        if d >= threshold
+    ][:top_k]
+    return filtered_results
+```
+
 ## 性能对比
 
 | 场景 | 预期耗时 |
@@ -88,6 +116,8 @@ def fetch_page(self, url: str) -> Optional[str]:
 | 国内网站 + 模型未加载 | 5-8秒 |
 | 国外网站无代理 | 10-30秒+ |
 | 国外网站有代理 | 3-8秒 |
+| RAG查询（小数据集） | 2-4秒 |
+| RAG查询（大数据集） | 5-10秒 |
 
 ## 诊断步骤
 
@@ -97,10 +127,18 @@ def fetch_page(self, url: str) -> Optional[str]:
    ⏱️ LLM推理耗时: X.XX秒
    ✅ 快速分析完成,总耗时: X.XX秒
    ```
+   
+   对于RAG查询：
+   ```
+   ⏱️ RAG查询耗时: X.XX秒
+   ⏱️ 向量检索耗时: X.XX秒
+   ⏱️ LLM生成耗时: X.XX秒
+   ```
 
 2. 根据日志判断瓶颈:
    - 如果爬取耗时>5秒 → 网络问题,考虑使用代理或国内网站
    - 如果LLM耗时>3秒 → Ollama未启动或模型未加载
+   - 如果RAG查询>8秒 → 可能是数据量过大，需要优化检索参数
 
 ## 立即可行的优化
 
@@ -110,4 +148,9 @@ def fetch_page(self, url: str) -> Optional[str]:
 - `https://news.sina.com.cn/c/2024-01-01/xxx.shtml`
 - `https://www.163.com/news/article/xxx.html`
 
-这样可以避免网络延迟,快速分析应该在3-5秒内完成。
+对于RAG查询，使用特定主题关键词以获得更精确的结果，如:
+- "最近的人工智能新闻"
+- "科技行业的舆论趋势"
+- "某公司相关的评论分析"
+
+这样可以避免网络延迟,快速分析应该在3-5秒内完成，RAG查询在5-8秒内完成。
